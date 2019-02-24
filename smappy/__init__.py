@@ -1,1 +1,1 @@
-from .smappy import Smappee, SimpleSmappee, LocalSmappee, __version__
+from .smappy import Smappee, SimpleSmappee, LocalSmappee, AppSmappee, __version__

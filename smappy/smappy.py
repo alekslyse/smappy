@@ -828,3 +828,17 @@ def urljoin(*parts):
     # join everything together
     url = '/'.join(part_list)
     return url
+
+
+class AppSmappee(object):
+
+    def __init__(self, ip):
+        """
+        Parameters
+        ----------
+        ip : str
+            local IP-address of your Smappee
+        """
+        self.ip = ip
+        self.headers = {'Content-Type': 'application/json;charset=UTF-8'}
+        self.session = requests.Session()
