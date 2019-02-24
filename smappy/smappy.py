@@ -11,7 +11,11 @@ __license__ = "MIT"
 
 URLS = {
     'token': 'https://app1pub.smappee.net/dev/v2/oauth2/token',
-    'servicelocation': 'https://app1pub.smappee.net/dev/v2/servicelocation'
+    'servicelocation': 'https://app1pub.smappee.net/dev/v2/servicelocation',
+    'applogin': 'https://app1pub.smappee.net/api/v9/login',
+    'appservicelocation': 'https://app1pub.smappee.net/api/v9/user/servicelocations',
+    'appApi': 'https://app1pub.smappee.net/api/v9',
+    'proApi': 'https://app1pub.smappee.net/api/v7'
 }
 
 
@@ -28,7 +32,7 @@ def authenticated(func):
             self.re_authenticate()
         return func(*args, **kwargs)
     return wrapper
-
+    
 
 class Smappee(object):
     """
@@ -832,13 +836,271 @@ def urljoin(*parts):
 
 class AppSmappee(object):
 
-    def __init__(self, ip):
+    def __init__(self, username=None, password=None):
         """
+        Object containing Smappee's API-methods for the mobile app
+
         Parameters
         ----------
-        ip : str
-            local IP-address of your Smappee
+        client_id : str, optional
+        client_secret : str, optional
+            If None, you won't be able to do any authorisation,
+            so it requires that you already have an access token somewhere.
+            In that case, the SimpleSmappee class is something for you.
         """
-        self.ip = ip
-        self.headers = {'Content-Type': 'application/json;charset=UTF-8'}
-        self.session = requests.Session()
+        self.username = username
+        self.password = password
+        self.access_token = None
+        self.refresh_token = None
+        self.token_expiration_time = None
+        
+
+    def authenticate(self, username, password):
+        """
+        Uses a Smappee username and password to request an access token,
+        refresh token and expiry date.
+
+        Parameters
+        ----------
+        username : str
+        password : str
+
+        Returns
+        -------
+        requests.Response
+            access token is saved in self.access_token
+            refresh token is saved in self.refresh_token
+            expiration time is set in self.token_expiration_time as
+            datetime.datetime
+        """
+        url = URLS['applogin']
+        data = {
+            "language": "en",
+            "userName": username,
+            "password": password,
+            "refresh": 1,
+        }
+        r = requests.post(url, data=data)
+        r.raise_for_status()
+        j = r.json()
+        self.access_token = j['token']
+        self.refresh_token = j['refreshToken']
+        self._set_token_expiration_time(86400)
+        return r
+
+    def _set_token_expiration_time(self, expires_in):
+        """
+        Saves the token expiration time by adding the 'expires in' parameter
+        to the current datetime (in utc).
+
+        Parameters
+        ----------
+        expires_in : int
+            number of seconds from the time of the request until expiration
+
+        Returns
+        -------
+        nothing
+            saves expiration time in self.token_expiration_time as
+            datetime.datetime
+        """
+        self.token_expiration_time = dt.datetime.utcnow() + \
+            dt.timedelta(0, expires_in)  # timedelta(days, seconds)
+
+    def re_authenticate(self):
+        """
+        Uses the refresh token to request a new access token, refresh token and
+        expiration date.
+
+        Returns
+        -------
+        requests.Response
+            access token is saved in self.access_token
+            refresh token is saved in self.refresh_token
+            expiration time is set in self.token_expiration_time as
+            datetime.datetime
+        """
+        url = urljoin(URLS['applogin'], '/refresh')
+        data = {
+            "refreshToken": self.refresh_token
+        }
+        r = requests.post(url, data=data)
+        r.raise_for_status()
+        j = r.json()
+        self.access_token = j['token']
+        self.refresh_token = j['refreshToken']
+        self._set_token_expiration_time(86400)
+        return r
+
+    @authenticated
+    def get_service_locations(self):
+        """
+        Request service locations
+
+        Returns
+        -------
+        dict
+        """
+        url = urljoin(URLS['appApi'], '/user/servicelocations')
+        headers = {"token": self.access_token}
+        r = requests.get(url, headers=headers)
+        r.raise_for_status()
+        return r.json()
+
+    @authenticated
+    def get_service_location_info(self, service_location_id):
+        """
+        Request service location info
+
+        Parameters
+        ----------
+        service_location_id : int
+
+        Returns
+        -------
+        dict
+        """
+        url = urljoin(URLS['appApi'], 'servicelocation', service_location_id)
+        headers = {"token": self.access_token}
+        r = requests.get(url, headers=headers)
+        r.raise_for_status()
+        return r.json()
+
+    @authenticated
+    def get_devices(self, service_location_id):
+        url = urljoin(URLS['appApi'], 'servicelocation', service_location_id, 'homecontrol/devices')
+        headers = {"token": self.access_token}
+        r = requests.get(url, headers=headers)
+        r.raise_for_status()
+        return r.json()
+
+    @authenticated
+    def get_appliances(self, service_location_id):
+        url = urljoin(URLS['appApi'], 'servicelocation', service_location_id, 'appliances')
+        headers = {"token": self.access_token}
+        r = requests.get(url, headers=headers)
+        r.raise_for_status()
+        return r.json()
+
+    @authenticated
+    def get_messages(self, items = 100, page = 1):
+        url = urljoin(URLS['appApi'], 'messages')
+        headers = {"token": self.access_token}
+
+        params = {
+            "pageSize": items,
+            "pageNumber": page
+        }
+
+        r = requests.get(url, headers=headers, params=params)
+        r.raise_for_status()
+        return r.json()
+
+    @authenticated
+    def get_events(self, service_location_id, items = 1000):
+        url = urljoin(URLS['appApi'], 'servicelocation', service_location_id, 'recentevents')
+        headers = {"token": self.access_token}
+
+        params = {
+            "maxNumber": items
+        }
+
+
+
+        r = requests.get(url, headers=headers, params=params)
+        r.raise_for_status()
+        return r.json()
+
+    @authenticated
+    def get_consumption(self, service_location_id, start, end, aggregation):
+        """
+        Request Elektricity consumption and Solar production
+        for a given service location.
+
+        Parameters
+        ----------
+        service_location_id : int
+        start : int | dt.datetime | pd.Timestamp
+        end : int | dt.datetime | pd.Timestamp
+            start and end support epoch (in milliseconds),
+            datetime and Pandas Timestamp
+        aggregation : int
+            1 = 5 min values (only available for the last 14 days)
+            2 = hourly values
+            3 = daily values
+            4 = monthly values
+            5 = quarterly values
+        raw : bool
+            default False
+            if True: Return the data "as is" from the server
+            if False: convert the 'alwaysOn' value to Wh.
+            (the server returns this value as the sum of the power,
+            measured in 5 minute blocks. This means that it is 12 times
+            higher than the consumption in Wh.
+            See https://github.com/EnergieID/smappy/issues/24)
+
+        Returns
+        -------
+        dict
+        """
+        url = urljoin(URLS['appApi'], 'servicelocation', service_location_id,
+                      "consumption")
+
+        d = self._get_consumption(url=url, start=start, end=end,
+                                  aggregation=aggregation)
+
+        return d
+
+    def _get_consumption(self, url, start, end, aggregation):
+        """
+        Request for both the get_consumption and
+        get_sensor_consumption methods.
+
+        Parameters
+        ----------
+        url : str
+        start : dt.datetime
+        end : dt.datetime
+        aggregation : int
+
+        Returns
+        -------
+        dict
+        """
+        start = self._to_milliseconds(start)
+        end = self._to_milliseconds(end)
+
+        headers = {"token": self.access_token}
+        params = {
+            "type": aggregation,
+            "from": start,
+            "to": end
+        }
+        r = requests.get(url, headers=headers, params=params)
+        r.raise_for_status()
+        return r.json()
+
+
+    def _to_milliseconds(self, time):
+        """
+        Converts a datetime-like object to epoch, in milliseconds
+        Timezone-naive datetime objects are assumed to be in UTC
+
+        Parameters
+        ----------
+        time : dt.datetime | pd.Timestamp | int
+
+        Returns
+        -------
+        int
+            epoch milliseconds
+        """
+        if isinstance(time, dt.datetime):
+            if time.tzinfo is None:
+                time = time.replace(tzinfo=pytz.UTC)
+            return int(time.timestamp() * 1e3)
+        elif isinstance(time, numbers.Number):
+            return time
+        else:
+            raise NotImplementedError("Time format not supported. Use milliseconds since epoch,\
+                                        Datetime or Pandas Datetime")
